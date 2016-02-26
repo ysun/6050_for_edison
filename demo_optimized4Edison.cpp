@@ -37,10 +37,12 @@ const char *NAME_FIFO = "/tmp/kr_fifo";
 int FD_FIFO = -1;
 int FIFO_OPEN_MODE = O_RDONLY;
 int FIFO_WRITE_MODE = 0x777 | S_IFIFO;
-char BUF_FIFO[32];
+#define BUF_FIFO_SIZE 32
+unsigned char BUF_FIFO[BUF_FIFO_SIZE];
 
-enum {
-    PIPE_CMD_MOVE_FORWARD = 0,
+enum TYPE_PIPE_CMD{
+    PIPE_CMD_STOP = 0,
+    PIPE_CMD_MOVE_FORWARD,
     PIPE_CMD_MOVE_BACKWARD,
     PIPE_CMD_TURN_LEFT,
     PIPE_CMD_TURN_RIGHT
@@ -52,12 +54,22 @@ struct MOTOR_DIRECTION {
     unsigned char stby;
 };
 
-struct MOTOR_DIRECTION motor_dir[] = {
-    [PIPE_CMD_MOVE_FORWARD]	= { 0, 1, 0},
-    [PIPE_CMD_MOVE_BACKWARD]	= { 1, 0, 0},
-    [PIPE_CMD_TURN_LEFT]	= { 0, 0, 0},
-    [PIPE_CMD_TURN_RIGHT]	= { 1, 1, 0},
+struct MOTOR_DIRECTION MOTOR_DIR[] = {
+    [PIPE_CMD_STOP]		= { 0, 0, 0},
+    [PIPE_CMD_MOVE_FORWARD]	= { 0, 1, 1},
+    [PIPE_CMD_MOVE_BACKWARD]	= { 1, 0, 1},
+    [PIPE_CMD_TURN_LEFT]	= { 0, 0, 1},
+    [PIPE_CMD_TURN_RIGHT]	= { 1, 1, 1},
 };
+
+#define get_motor_direction(pipe_cmd, ea, eb, stby)               \
+    do {                                                          \
+         ea = MOTOR_DIR[pipe_cmd].a;                              \
+         eb = MOTOR_DIR[pipe_cmd].b;                              \
+         stby = MOTOR_DIR[pipe_cmd].stby;                         \
+                                                                  \
+    } while(0)
+
 #define OUTPUT_READABLE_QUATERNION
 #define OUTPUT_READABLE_EULER
 #define OUTPUT_READABLE_YAWPITCHROLL
@@ -100,7 +112,7 @@ void loop() {
         //printf("\n");
     }
 
-   // if(mpu_body.dmpGetData())
+   //if(mpu_body.dmpGetData())
     //{
         /*
         //printf("quat %7.2f %7.2f %7.2f %7.2f    ", dmpQuat.w,dmpQuat.x,dmpQuat.y,dmpQuat.z);
@@ -118,8 +130,6 @@ int initial_pipe(){
     remove( NAME_FIFO);
     mknod( NAME_FIFO, FIFO_WRITE_MODE, (dev_t)0);
 
-//    FD_FIFO = open(NAME_FIFO, FIFO_OPEN_MODE);
-
     return 0;
 }
 
@@ -129,53 +139,43 @@ int block_till_pipe_connected(){
     FD_FIFO = open(NAME_FIFO, FIFO_OPEN_MODE);
     return 0;
 }
+
+int flush_motors(int ea, int eb, int stby, int pwma, int pwmb){
+    STBY_6612->write(stby);
+    EA_6612->write(ea);
+    EB_6612->write(eb);
+
+    PWM_A->write(pwma);  //Right
+    PWM_B->write(pwmb);  //Left
+ 
+}
 int main() {
     setup();
     usleep(100000);
     float ypr, pwma = 0.5, pwmb = 0.5;
+    float start_angle, tmp_angle, a, b;
+
+    unsigned char ea, eb, stby;
+    enum TYPE_PIPE_CMD pipe_cmd = PIPE_CMD_MOVE_FORWARD;
+    int ret = 0;
+
     STBY_6612->write(0);
-    EA_6612->write(0);
-    EB_6612->write(1);
 
     initial_pipe();
 
-    float start_angle;
+////////////////////////////////////////////////////////
+// Get the start angle from 6050
+// The theory is that when the closed 2 data are very near
+// we take it as the initial 6050 angle
+//
+/////////////////////////////////////////////////////////
     start_angle = mpu_head.dmpGetFirstYPRData();
-    float tmp_angle, a, b;
-    for (;;)
+    while (true)
     {
-        //tmp_angle = mpu_head.dmpGetFirstYPRData();
-        //if ((int(start_angle) == -255) || ((start_angle - tmp_angle) > 5) || ((start_angle - tmp_angle) < -5))
-/*
-        start_angle = mpu_head.dmpGetFirstYPRData();
-        while(1)
-        {
-	    tmp_angle = mpu_head.dmpGetFirstYPRData();
-            if (int(tmp_angle) == -255)
-            {
-                continue;
-            }
-            else
-                break;
-        }
-        if (int(start_angle) == -255)
-        {
-            start_angle = mpu_head.dmpGetFirstYPRData();
-            continue;
-        }
-        else if (((start_angle - tmp_angle) < 5) && ((start_angle - tmp_angle) > -5))
-        {
-            printf("start_angle %f - tmp_angle %f", start_angle, tmp_angle);
-            usleep(100000);
-            break;
-        }
-        else
-            continue;
-*/
-        for(;;)
+        while(true)
 	  if ((a = mpu_head.dmpGetFirstYPRData()) != -255) break; 
 
-	for(;;)
+	while(true)
 	  if ((b = mpu_head.dmpGetFirstYPRData()) != -255) break; 
 
 	if( fabs(a - b) < 0.05) break;
@@ -184,32 +184,44 @@ int main() {
     start_angle = a;
     printf("start_angle %f\n", start_angle);
 
+    //The main program can be blocked here till the pipe connection is made!
     block_till_pipe_connected();
 
+    // The initial speed
+    // FIXME: PLEASE do not use imediately number!!
     PWM_A->write(0.5);  //Right
     PWM_B->write(0.5);  //Left
 
-    STBY_6612->write(1);
+    while(1){
 
-    for (;;)
-    {
+	//STEP-1: get command from fifo pipe.
+        ret = read(FD_FIFO, BUF_FIFO, BUF_FIFO_SIZE);
+
+	//STEP-2: paser command.
+        pipe_cmd = TYPE_PIPE_CMD(atoi((const char*) &BUF_FIFO[0]));
+
+	//STEP-3: translate the pipe command
+        get_motor_direction(pipe_cmd, ea, eb, stby);
+
+	//STEP-4: logic for tuning the two PWM dynamically!
+	//TODO: Implement the other 3 directions and stop function!
         ypr = mpu_head.dmpGetFirstYPRData();
-	if (int(ypr) != -255 ){
-		printf("ypr %f\n", ypr);
 
-		if(ypr - start_angle > 0.2)
-			pwma += 0.05;
-		else if (ypr - start_angle < -0.2)
-			pwma -= 0.05;
+        if (pipe_cmd == PIPE_CMD_MOVE_FORWARD)
+        {
+    	    if (int(ypr) != -255 ){
+    	    	printf("ypr %f\n", ypr);
+    
+    	    	if(ypr - start_angle > 0.2)
+    	    		pwma += 0.05;
+    	    	else if (ypr - start_angle < -0.2)
+    	    		pwma -= 0.05;
+    	    }
+        }
 
-	       PWM_A->write(pwma);  //Right
-	       PWM_B->write(pwmb);  //Left
-		sleep(10);
-	}
+	//FINAL: drive motors as we wanted
+        flush_motors(ea, eb, stby, pwma, pwmb);
+	sleep(10);
     }
     return 0;
 }
-
-
-
-
