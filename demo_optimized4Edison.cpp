@@ -15,6 +15,8 @@
 #include "MPU6050_4Edison.hpp"
 #include "mraa.h"
 
+#include <sys/types.h>
+#include <sys/stat.h>
 
 MPU6050 mpu_head;
 //MPU6050 mpu_body;
@@ -31,8 +33,32 @@ mraa::Gpio* EA_6612 = new mraa::Gpio(PIN_6612_EA);
 mraa::Gpio* EB_6612 = new mraa::Gpio(PIN_6612_EB);
 mraa::Gpio* STBY_6612 = new mraa::Gpio(PIN_6612_STBY);
 
+const char *NAME_FIFO = "/tmp/kr_fifo";
+int FD_FIFO = -1;
+int FIFO_OPEN_MODE = O_RDONLY;
+int FIFO_WRITE_MODE = 0x777 | S_IFIFO;
+char BUF_FIFO[32];
 
-//#define OUTPUT_READABLE_QUATERNION
+enum {
+    PIPE_CMD_MOVE_FORWARD = 0,
+    PIPE_CMD_MOVE_BACKWARD,
+    PIPE_CMD_TURN_LEFT,
+    PIPE_CMD_TURN_RIGHT
+};
+
+struct MOTOR_DIRECTION {
+    unsigned char a;
+    unsigned char b;
+    unsigned char stby;
+};
+
+struct MOTOR_DIRECTION motor_dir[] = {
+    [PIPE_CMD_MOVE_FORWARD]	= { 0, 1, 0},
+    [PIPE_CMD_MOVE_BACKWARD]	= { 1, 0, 0},
+    [PIPE_CMD_TURN_LEFT]	= { 0, 0, 0},
+    [PIPE_CMD_TURN_RIGHT]	= { 1, 1, 0},
+};
+#define OUTPUT_READABLE_QUATERNION
 #define OUTPUT_READABLE_EULER
 #define OUTPUT_READABLE_YAWPITCHROLL
 #define OUTPUT_READABLE_REALACCEL
@@ -88,7 +114,21 @@ void loop() {
           */
     //}
 }
+int initial_pipe(){
+    remove( NAME_FIFO);
+    mknod( NAME_FIFO, FIFO_WRITE_MODE, (dev_t)0);
 
+//    FD_FIFO = open(NAME_FIFO, FIFO_OPEN_MODE);
+
+    return 0;
+}
+
+int block_till_pipe_connected(){
+
+    printf("Waiting for a pipe connnection %s\n", NAME_FIFO);
+    FD_FIFO = open(NAME_FIFO, FIFO_OPEN_MODE);
+    return 0;
+}
 int main() {
     setup();
     usleep(100000);
@@ -97,6 +137,7 @@ int main() {
     EA_6612->write(0);
     EB_6612->write(1);
 
+    initial_pipe();
 
     float start_angle;
     start_angle = mpu_head.dmpGetFirstYPRData();
@@ -141,11 +182,13 @@ int main() {
     }
 
     start_angle = a;
-
-    PWM_A->write(a);  //Right
-    PWM_B->write(b);  //Left
-
     printf("start_angle %f\n", start_angle);
+
+    block_till_pipe_connected();
+
+    PWM_A->write(0.5);  //Right
+    PWM_B->write(0.5);  //Left
+
     STBY_6612->write(1);
 
     for (;;)
@@ -159,8 +202,8 @@ int main() {
 		else if (ypr - start_angle < -0.2)
 			pwma -= 0.05;
 
-	       PWM_A->write(a);  //Right
-	       PWM_B->write(b);  //Left
+	       PWM_A->write(pwma);  //Right
+	       PWM_B->write(pwmb);  //Left
 		sleep(10);
 	}
     }
