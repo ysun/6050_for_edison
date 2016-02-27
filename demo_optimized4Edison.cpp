@@ -140,7 +140,7 @@ int block_till_pipe_connected(){
     return 0;
 }
 
-int flush_motors(int ea, int eb, int stby, int pwma, int pwmb){
+int flush_motors(int ea, int eb, int stby, float pwma, float pwmb){
     STBY_6612->write(stby);
     EA_6612->write(ea);
     EB_6612->write(eb);
@@ -162,6 +162,8 @@ int main() {
     STBY_6612->write(0);
 
     initial_pipe();
+    //The main program can be blocked here till the pipe connection is made!
+    block_till_pipe_connected();
 
 ////////////////////////////////////////////////////////
 // Get the start angle from 6050
@@ -183,9 +185,6 @@ int main() {
 
     start_angle = a;
     printf("start_angle %f\n", start_angle);
-
-    //The main program can be blocked here till the pipe connection is made!
-    block_till_pipe_connected();
 
     // The initial speed
     // FIXME: PLEASE do not use imediately number!!

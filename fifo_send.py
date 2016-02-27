@@ -56,6 +56,6 @@ if "__main__" == __name__:
         sys.exit(1);  
 	fifo.close()
 
-    print("sending cmd: %c" % str_cmd)
-    fifo.write("%c\n"%(str_cmd))
+    print("sending cmd: %s" % str_cmd)
+    fifo.write("%s\n"%(str_cmd))
     fifo.close()
