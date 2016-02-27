@@ -250,6 +250,7 @@ int main() {
 
 	if (cmd_arg.enable == 1) {
             run_cmd = true; 
+	    continue;
         }
         if (run_cmd) {
             if (cmd_arg.cmd == PIPE_CMD_MOVE_FORWARD)
@@ -332,7 +333,11 @@ int main() {
             drive_car(cmd_arg, pwma, pwmb);
             run_cmd = false; 
         }
-
+/*
+	if (cmd_arg.enable == 0) {
+            run_cmd = false; 
+        }
+*/
 //    	printf("cmd_arg.enable%d\n", cmd_arg.enable);
 	memset(BUF_FIFO, 0, BUF_FIFO_SIZE);
 	//FINAL: drive motors as we wanted
