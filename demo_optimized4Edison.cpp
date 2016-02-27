@@ -97,8 +97,8 @@ get_cmd_args(void)
     sscanf((const char *)BUF_FIFO, "%d %f %f %d",
         &tmp_cmd_arg.cmd, &tmp_cmd_arg.arg1_f, &tmp_cmd_arg.arg2_f, &tmp_cmd_arg.enable);
 
-    printf("BUF_FIFO, cmd: %d arg1: %f arg2: %f enable: %d", 
-        tmp_cmd_arg.cmd, tmp_cmd_arg.arg1_f, tmp_cmd_arg.arg2_f, tmp_cmd_arg.enable);
+//    printf("BUF_FIFO, cmd: %d arg1: %f arg2: %f enable: %d", 
+//        tmp_cmd_arg.cmd, tmp_cmd_arg.arg1_f, tmp_cmd_arg.arg2_f, tmp_cmd_arg.enable);
 
     return tmp_cmd_arg;
 
@@ -191,7 +191,7 @@ int main() {
     setup();
     usleep(100000);
     float ypr, pwma = 0.5, pwmb = 0.5;
-    float start_angle, tmp_angle, a, b;
+    float start_angle, stop_angle, tmp_angle, a, b;
 
     unsigned char ea, eb, stby;
     enum TYPE_PIPE_CMD pipe_cmd = PIPE_CMD_MOVE_FORWARD;
@@ -239,7 +239,6 @@ int main() {
 
 	//STEP-2: paser command.
 //        pipe_cmd = TYPE_PIPE_CMD(atoi((const char*) &BUF_FIFO[0]));
-    	printf("try to get command\n");
         cmd_arg = get_cmd_args();
 	//STEP-3: translate the pipe command
         get_motor_direction(pipe_cmd, ea, eb, stby);
@@ -255,14 +254,12 @@ int main() {
         if (run_cmd) {
             if (cmd_arg.cmd == PIPE_CMD_MOVE_FORWARD)
             {
-    	    if( pwmb != cmd_arg.speed)
-    	    {
-    		pwmb = cmd_arg.speed;
-                    pwma = cmd_arg.speed;
-    	    }
+        	    if( pwmb != cmd_arg.speed)
+        	    {
+        		pwmb = cmd_arg.speed;
+                        pwma = cmd_arg.speed;
+        	    }
         	    if (int(ypr) != -255 ){
-        	    	printf("ypr %f\n", ypr);
-        
         	    	if(ypr - start_angle > 0.2)
         	    		pwma += 0.05;
         	    	else if (ypr - start_angle < -0.2)
@@ -277,8 +274,6 @@ int main() {
                     pwma = cmd_arg.speed;
                 }
                 if (int(ypr) != -255 ){
-                    printf("ypr %f\n", ypr);
-    
                     if(ypr - start_angle > 0.2)
                             pwma += 0.05;
                     else if (ypr - start_angle < -0.2)
@@ -288,49 +283,62 @@ int main() {
             else if (cmd_arg.cmd == PIPE_CMD_TURN_LEFT)
             {
                 drive_car(cmd_arg, pwma, pwmb);
-                printf("start to move\n");
+
+                printf("Turn Left: from %f -%f\n", start_angle, cmd_arg.angle);
     	        while(1){
                     ypr = mpu_head.dmpGetFirstYPRData();
                     if (int(ypr) != -255 ){
-                        printf("ypr %f\n", ypr);
-                        if((ypr - start_angle) < -cmd_arg.angle) {
-    	            	    printf("aaaaaaaaaaaaa\n");
-    	        	    cmd_arg.cmd = PIPE_CMD_STOP;
+
+                        if ( start_angle - cmd_arg.angle < -180)
+                            stop_angle = start_angle - cmd_arg.angle +360;
+                        else
+                            stop_angle = start_angle - cmd_arg.angle;
+
+                        if ( fabs(ypr - stop_angle) <= 1) {
+                            cmd_arg.cmd = PIPE_CMD_STOP;
                             start_angle = ypr;
-     	                    break;
-    	                  }
+                            printf("Complete turn Left: current angle: %f\n", start_angle);
+                            break;
+                        }
                     }
                 }
             }
             else if (cmd_arg.cmd == PIPE_CMD_TURN_RIGHT)
             {
+
                 drive_car(cmd_arg, pwma, pwmb);
-                printf("start to move\n");
-                while(1){
+
+                printf("Turn Right: from %f -%f\n", start_angle, cmd_arg.angle);
+    	        while(1){
                     ypr = mpu_head.dmpGetFirstYPRData();
                     if (int(ypr) != -255 ){
-                        printf("ypr %f\n", ypr);
-                        if((ypr - start_angle) > cmd_arg.angle) {
-                            printf("aaaaaaaaaaaaa\n");
+
+                        if ( start_angle + cmd_arg.angle > 180)
+                            stop_angle = start_angle + cmd_arg.angle - 360;
+                        else
+                            stop_angle = start_angle + cmd_arg.angle;
+
+                        if ( fabs(ypr - stop_angle) <= 1) {
                             cmd_arg.cmd = PIPE_CMD_STOP;
                             start_angle = ypr;
+                            printf("Complete turn Right: current angle: %f\n", start_angle);
                             break;
-                          }
+                        }
                     }
                 }
             }
 
+	    //FINAL: drive motors as we wanted
             drive_car(cmd_arg, pwma, pwmb);
-        }
-	if (cmd_arg.enable == 0) {
             run_cmd = false; 
         }
-    	printf("cmd_arg.enable%d\n", cmd_arg.enable);
+
+//    	printf("cmd_arg.enable%d\n", cmd_arg.enable);
 	memset(BUF_FIFO, 0, BUF_FIFO_SIZE);
 	//FINAL: drive motors as we wanted
-    	printf("cmd_arg.cmd %d\n", cmd_arg.cmd);
+//  	printf("cmd_arg.cmd %d\n", cmd_arg.cmd);
         //flush_motors(MOTOR_DIR[cmd_arg.cmd].a, MOTOR_DIR[cmd_arg.cmd].b, MOTOR_DIR[cmd_arg.cmd].stby, pwma, pwmb);
-	sleep(1);
+	sleep(0.01);
     }
     return 0;
 }
