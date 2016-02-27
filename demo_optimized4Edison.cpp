@@ -54,6 +54,20 @@ struct MOTOR_DIRECTION {
     unsigned char stby;
 };
 
+struct TYPE_CMD_ARG {
+    enum TYPE_PIPE_CMD cmd;
+    union {
+       float speed;
+       float angle;
+       float arg1_f;
+    };
+    union {
+       float distance;
+       float arg2_f;
+    };
+    unsigned int enable;
+};
+
 struct MOTOR_DIRECTION MOTOR_DIR[] = {
     [PIPE_CMD_STOP]		= { 0, 0, 0},
     [PIPE_CMD_MOVE_FORWARD]	= { 0, 1, 1},
@@ -76,6 +90,30 @@ struct MOTOR_DIRECTION MOTOR_DIR[] = {
 #define OUTPUT_READABLE_REALACCEL
 #define OUTPUT_READABLE_WORLDACCEL
 //#define OUTPUT_TEAPOT
+struct TYPE_CMD_ARG
+get_cmd_args(void) 
+{
+    struct TYPE_CMD_ARG tmp_cmd_arg;
+    sscanf((const char *)BUF_FIFO, "%d %f %f %d",
+        &tmp_cmd_arg.cmd, &tmp_cmd_arg.arg1_f, &tmp_cmd_arg.arg2_f, &tmp_cmd_arg.enable);
+
+    printf("BUF_FIFO, cmd: %d arg1: %f arg2: %f enable: %d", 
+        tmp_cmd_arg.cmd, tmp_cmd_arg.arg1_f, tmp_cmd_arg.arg2_f, tmp_cmd_arg.enable);
+
+    return tmp_cmd_arg;
+
+}
+
+void drive_car(struct TYPE_CMD_ARG drive_cmd_arg, float pwma, float pwmb)
+{
+    STBY_6612->write(MOTOR_DIR[drive_cmd_arg.cmd].stby);
+    EA_6612->write(MOTOR_DIR[drive_cmd_arg.cmd].a);
+    EB_6612->write(MOTOR_DIR[drive_cmd_arg.cmd].b);
+
+    PWM_A->write(pwma);  //Right
+    PWM_B->write(pwmb);  //Left
+
+}
 
 // MPU control/status vars
 bool dmpHeadReady = false;  // set true if DMP init was successful
@@ -157,6 +195,8 @@ int main() {
 
     unsigned char ea, eb, stby;
     enum TYPE_PIPE_CMD pipe_cmd = PIPE_CMD_MOVE_FORWARD;
+    struct TYPE_CMD_ARG cmd_arg;
+    
     int ret = 0;
 
     STBY_6612->write(0);
@@ -188,8 +228,9 @@ int main() {
 
     // The initial speed
     // FIXME: PLEASE do not use imediately number!!
-    PWM_A->write(0.5);  //Right
-    PWM_B->write(0.5);  //Left
+    
+    bool run_cmd = false;
+    bool cmd_self_flag = false;
 
     while(1){
 
@@ -197,30 +238,99 @@ int main() {
         ret = read(FD_FIFO, BUF_FIFO, BUF_FIFO_SIZE);
 
 	//STEP-2: paser command.
-        pipe_cmd = TYPE_PIPE_CMD(atoi((const char*) &BUF_FIFO[0]));
-
+//        pipe_cmd = TYPE_PIPE_CMD(atoi((const char*) &BUF_FIFO[0]));
+    	printf("try to get command\n");
+        cmd_arg = get_cmd_args();
 	//STEP-3: translate the pipe command
         get_motor_direction(pipe_cmd, ea, eb, stby);
+
 
 	//STEP-4: logic for tuning the two PWM dynamically!
 	//TODO: Implement the other 3 directions and stop function!
         ypr = mpu_head.dmpGetFirstYPRData();
 
-        if (pipe_cmd == PIPE_CMD_MOVE_FORWARD)
-        {
-    	    if (int(ypr) != -255 ){
-    	    	printf("ypr %f\n", ypr);
-    
-    	    	if(ypr - start_angle > 0.2)
-    	    		pwma += 0.05;
-    	    	else if (ypr - start_angle < -0.2)
-    	    		pwma -= 0.05;
-    	    }
+	if (cmd_arg.enable == 1) {
+            run_cmd = true; 
         }
+        if (run_cmd) {
+            if (cmd_arg.cmd == PIPE_CMD_MOVE_FORWARD)
+            {
+    	    if( pwmb != cmd_arg.speed)
+    	    {
+    		pwmb = cmd_arg.speed;
+                    pwma = cmd_arg.speed;
+    	    }
+        	    if (int(ypr) != -255 ){
+        	    	printf("ypr %f\n", ypr);
+        
+        	    	if(ypr - start_angle > 0.2)
+        	    		pwma += 0.05;
+        	    	else if (ypr - start_angle < -0.2)
+        	    		pwma -= 0.05;
+        	    }
+            }
+            else if (cmd_arg.cmd == PIPE_CMD_MOVE_BACKWARD)
+            {
+                if( pwmb != cmd_arg.speed)
+                {
+                    pwmb = cmd_arg.speed;
+                    pwma = cmd_arg.speed;
+                }
+                if (int(ypr) != -255 ){
+                    printf("ypr %f\n", ypr);
+    
+                    if(ypr - start_angle > 0.2)
+                            pwma += 0.05;
+                    else if (ypr - start_angle < -0.2)
+                            pwma -= 0.05;
+                }
+            }
+            else if (cmd_arg.cmd == PIPE_CMD_TURN_LEFT)
+            {
+                drive_car(cmd_arg, pwma, pwmb);
+                printf("start to move\n");
+    	        while(1){
+                    ypr = mpu_head.dmpGetFirstYPRData();
+                    if (int(ypr) != -255 ){
+                        printf("ypr %f\n", ypr);
+                        if((ypr - start_angle) < -cmd_arg.angle) {
+    	            	    printf("aaaaaaaaaaaaa\n");
+    	        	    cmd_arg.cmd = PIPE_CMD_STOP;
+                            start_angle = ypr;
+     	                    break;
+    	                  }
+                    }
+                }
+            }
+            else if (cmd_arg.cmd == PIPE_CMD_TURN_RIGHT)
+            {
+                drive_car(cmd_arg, pwma, pwmb);
+                printf("start to move\n");
+                while(1){
+                    ypr = mpu_head.dmpGetFirstYPRData();
+                    if (int(ypr) != -255 ){
+                        printf("ypr %f\n", ypr);
+                        if((ypr - start_angle) > cmd_arg.angle) {
+                            printf("aaaaaaaaaaaaa\n");
+                            cmd_arg.cmd = PIPE_CMD_STOP;
+                            start_angle = ypr;
+                            break;
+                          }
+                    }
+                }
+            }
 
+            drive_car(cmd_arg, pwma, pwmb);
+        }
+	if (cmd_arg.enable == 0) {
+            run_cmd = false; 
+        }
+    	printf("cmd_arg.enable%d\n", cmd_arg.enable);
+	memset(BUF_FIFO, 0, BUF_FIFO_SIZE);
 	//FINAL: drive motors as we wanted
-        flush_motors(ea, eb, stby, pwma, pwmb);
-	sleep(10);
+    	printf("cmd_arg.cmd %d\n", cmd_arg.cmd);
+        //flush_motors(MOTOR_DIR[cmd_arg.cmd].a, MOTOR_DIR[cmd_arg.cmd].b, MOTOR_DIR[cmd_arg.cmd].stby, pwma, pwmb);
+	sleep(1);
     }
     return 0;
 }
