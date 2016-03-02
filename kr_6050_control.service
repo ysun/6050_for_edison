@@ -1,0 +1,13 @@
+[Unit]
+Description=The Edison status and configuration service
+After=mdns.service
+
+[Service]
+ExecStart=/bin/su root -c 'cd /usr/lib/edison_config_tools/blockr; ./kr_6050_control.bin'
+Restart=always
+RestartSec=10s
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target
+
