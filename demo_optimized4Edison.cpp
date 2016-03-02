@@ -237,6 +237,8 @@ int main() {
 	//STEP-1: get command from fifo pipe.
         ret = read(FD_FIFO, BUF_FIFO, BUF_FIFO_SIZE);
 
+	printf("ret:%d, %s\n", ret, BUF_FIFO);
+
 	//STEP-2: paser command.
 //        pipe_cmd = TYPE_PIPE_CMD(atoi((const char*) &BUF_FIFO[0]));
         cmd_arg = get_cmd_args();
@@ -283,6 +285,7 @@ int main() {
             }
             else if (cmd_arg.cmd == PIPE_CMD_TURN_LEFT)
             {
+		pwma = pwmb = 0.5;
                 drive_car(cmd_arg, pwma, pwmb);
 
                 printf("Turn Left: from %f -%f\n", start_angle, cmd_arg.angle);
@@ -307,6 +310,7 @@ int main() {
             else if (cmd_arg.cmd == PIPE_CMD_TURN_RIGHT)
             {
 
+		pwma = pwmb = 0.5;
                 drive_car(cmd_arg, pwma, pwmb);
 
                 printf("Turn Right: from %f -%f\n", start_angle, cmd_arg.angle);
